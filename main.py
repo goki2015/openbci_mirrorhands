@@ -2,16 +2,16 @@ from brainflow.board_shim import BoardIds,BoardShim,BrainFlowInputParams
 from brainflow.data_filter import DataFilter, FilterTypes
 import time
 from collections import deque
+import numpy as np
+from filter_module import apply_filter
 
 settings = {
     "port":"/dev/ttyUSB0",
     "BAND":(5.0,110),
     "BAND_ORDER":4,
-    "NOTCH_F":(50,100),
-    "NOTCH_Q":30,
+    "NOTCH_F":((48,52),(98,102)), #for 50Hz in JP
     "RMS_MS":200,
 }
-
 
 def main():
     board_id = BoardIds.CYTON_BOARD.value
@@ -38,16 +38,17 @@ def main():
                 continue
             new = data[ch]
             raw_buf.extend(float(v) for v in new)
+            filtered_buf = apply_filter(raw_buf,fs)
 
-            k = min(len(new), len(raw_buf))
-
-            raws = new[-k:]
-            for i in range(k):
-                print(f"RAWDATA:{float(raws[i])}")
-
+            for i, v in enumerate(new):
+                print(f"RAWDATA:{float(v)}")
+                print(f"FILTER_DATA:{filtered_buf[-len(new)+i]}")
 
     except KeyboardInterrupt:
         print("stop")
+    finally:
+        board.stop_stream()
+        board.release_session()
 
 
 if __name__ == "__main__":

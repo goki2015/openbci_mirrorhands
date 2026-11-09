@@ -1,0 +1,18 @@
+[package]
+name = "filter_module"
+version = "0.1.0"
+edition = "2021"
+description = "Causal real-time EMG filter for OpenBCI data"
+license = "MIT"
+
+[lib]
+name = "filter_module"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
