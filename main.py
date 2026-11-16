@@ -1,24 +1,9 @@
 from brainflow.board_shim import BoardIds,BoardShim,BrainFlowInputParams
-from brainflow.data_filter import DataFilter, FilterTypes
 import time
-from collections import deque
-import numpy as np
-from filter_module import apply_filter
+from filter_module import StreamingFilter
 from mirrorhand import MirrorHand
-from scipy import signal
 
-settings = {
-    "port":"/dev/ttyUSB0",
-    "BAND":(5.0,110),
-    "BAND_ORDER":4,
-    "NOTCH_F":((48,52),(98,102)), #for 50Hz in JP
-    "RMS_MS":200/1000,
-}
-
-def temp_rms(buf,fs) -> np.ndarray:
-    x = np.array(buf,dtype=float)
-    w = max(1, int(round( settings["RMS_MS"] * fs)))
-    return np.sqrt(signal.lfilter(np.ones(w) / w, [1.0], x * x))
+settings = {"port":"/dev/ttyUSB0", "verbose":False}
 
 def main():
     board_id = BoardIds.CYTON_BOARD.value
@@ -32,13 +17,11 @@ def main():
     board.prepare_session()
     fs = BoardShim.get_sampling_rate(board_id)
 
-    # 先にグローブを待つ（本体で MIRROR GUIDE → START を押して接続してからボードを流す）
-    hand = MirrorHand(port="/dev/ttyUSB1")
-    hand.connect()
+    filt = StreamingFilter(fs=float(fs))   # 50/100 Hz ノッチ → 5–110 Hz BP(4次) → RMS(200 ms)
+    hand = MirrorHand(port="/dev/ttyUSB1") # グローブは ttyUSB1 と推定して選択
+    hand.connect()                         # ビーコン待ちでブロック（本体で MIRROR GUIDE → START）
 
     board.start_stream(45000)
-
-    raw_buf:deque[float] = deque(maxlen=int(fs*(settings["RMS_MS"])))
     ch = BoardShim.get_exg_channels(board_id)[0]
 
     try:
@@ -48,15 +31,13 @@ def main():
                 time.sleep(1/fs)
                 continue
             new = data[ch]
-            raw_buf.extend(float(v) for v in new)
-            filtered_buf = apply_filter(raw_buf,fs)
-            rms = temp_rms(filtered_buf,fs)
-
-            for i, v in enumerate(new):
-                print(f"RAWDATA:{float(v)}")
-                print(f"FILTER_DATA:{filtered_buf[-len(new)+i]}")
-                print(f"RMS:{rms[-len(new)+i]}")
-            hand.update(float(rms[-1]))
+            for v in new:
+                fval, rms = filt.process(float(v))
+                if settings["verbose"]:
+                    print(f"RAWDATA:{float(v)}")
+                    print(f"FILTER_DATA:{fval}")
+                    print(f"RMS:{rms}")
+                hand.update(rms)
 
     except KeyboardInterrupt:
         print("stop")
@@ -64,7 +45,6 @@ def main():
         hand.close()
         board.stop_stream()
         board.release_session()
-
 
 if __name__ == "__main__":
     main()

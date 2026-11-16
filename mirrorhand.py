@@ -1,42 +1,20 @@
-"""RMTC_GLOVE ロボットグローブを RMS（包絡）値で開閉する小さなドライバ。
+"""RMTC_GLOVE を RMS（包絡）で開閉するドライバ。
 
-Archive/robot/update_project の SerialService と UDP 検証版 mirrorhand_udp.py の
-手順を組み合わせたもの:
+流れ:  57600/8N1で開く → 'device' ビーコン待ち → RMTC_GLOVE\\r（即時）
+      → DATA:v:...\\r を keepalive 再送（閉=100, 開=10）
 
-  1. 57600 / 8N1 で開く
-  2. グローブが発する 'device' ビーコンを待つ         ← 本体で MIRROR GUIDE → START を押す
-  3. ビーコンを見つけたら即 "RMTC_GLOVE\\r" を送る    （更新プログラムと同じハンドシェイク）
-  4. "DATA:0:v:0:v:0:v:0:v:0:v\\r" (指5本分, 各0-100) を送り続ける
-       閉=[100]*5, 開=[10]*5  (SerialService.send_grip / send_relax と同じ値)
-
-main.py からの使い方:
-
-    from mirrorhand import MirrorHand
-    hand = MirrorHand(port="/dev/ttyUSB1")  # ボードは ttyUSB0。グローブはこちら推定
-    hand.connect()        # ビーコン待ちでブロック（本体で MIRROR GUIDE → START を押す）
-    # ...ループ内（新着サンプル処理後）:
-    hand.update(float(rms[-1]))
-    # ...finally 内:
-    hand.close()
-
-しきい値 GRIP_UV / RELEASE_UV は各人の電極・筋で変わるので要実測調整。
-（参考実測: 安静 median 7.5 µV / 強握り median 39.7 µV、read_from_cython）
+しきい値は calibrate.AdaptiveThreshold が起動時に実測（安静→活動順）。
+完了までは動かしません。
 """
-
-"""
-
-"""
-
 import time
-
+import threading
 import serial
+from calibrate import AdaptiveThreshold
 
-OPEN = 10       # 開いた状態のグローブ値 (0-100)
-CLOSE = 100     # 握りの状態のグローブ値 (0-100)
-GRIP_UV = 30.0      # これ以上で閉じる（µV）
-RELEASE_UV = 15.0   # これ以下で開く（µV・差がヒステリシス）
-SEND_INTERVAL = 0.2  # コマンドの再送間隔 [s]（keepalive）
-BEACON_TIMEOUT = 180  # 'device' 待ちの上限 [s]
+OPEN = 10       # 開いた状態の値 (0-100)
+CLOSE = 100     # 閉じた状態の値 (0-100)
+SEND_INTERVAL = 0.2     # keepalive 再送間隔 [s]
+BEACON_TIMEOUT = 180    # 'device' 待ちの上限 [s]
 
 
 class MirrorHand:
@@ -46,25 +24,25 @@ class MirrorHand:
         self.ser = None
         self.closed = False
         self.last_send = 0.0
+        self.calib = AdaptiveThreshold()  # 安静→活動の順で集める
+        self._stop_keepalive = threading.Event()
+        self._ka_thread = None
 
     def connect(self):
-        self.ser = serial.Serial(
-            port=self.port,
-            baudrate=self.baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=0.05,
-            write_timeout=1,
-        )
+        self.ser = serial.Serial(port=self.port, baudrate=self.baudrate,
+                                 bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
+                                 stopbits=serial.STOPBITS_ONE,
+                                 timeout=0.05, write_timeout=1)
         self.ser.reset_input_buffer()
-        print("[mirrorhand] 本体で MIRROR GUIDE → START の順に押してください。")
-        print("[mirrorhand] 'device' ビーコン待機中…", flush=True)
+        print("[mirrorhand] 本体で MIRROR GUIDE → START の順に押してください。", flush=True)
         self._wait_for_beacon()
-        self._write("RMTC_GLOVE\r")    # ビーコン検出から即時にハンドシェイク
-        self._send_all(OPEN)           # 初期状態は開いたまま
+        self._write("RMTC_GLOVE\r")              # 検出したら即ハンドシェイク
+        self._send_all(OPEN)                     # 初期状態は開いたまま
         self.closed = False
-        print(f"[mirrorhand] 接続しました on {self.port}")
+        self._stop_keepalive.clear()
+        self._ka_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+        self._ka_thread.start()                  # ← 握手後も切れないように常時再送
+        print(f"[mirrorhand] 接続しました on {self.port}", flush=True)
 
     def _wait_for_beacon(self):
         t0 = time.time()
@@ -83,10 +61,9 @@ class MirrorHand:
         self.ser.write(text.encode("ascii"))
 
     def _send_all(self, value):
-        v = int(round(value))
         packet = "DATA"
         for _ in range(5):
-            packet += ":0:%d" % v
+            packet += ":0:%d" % int(round(value))
         packet += "\r"
         self._write(packet)
         self.last_send = time.time()
@@ -95,29 +72,38 @@ class MirrorHand:
         """RMS [µV] を受け取り開閉する。閉じていれば True を返す。"""
         if self.ser is None:
             return False
-
+        if not self.calib.ready:              # キャリブレーション中は何もしない
+            self.calib.push(rms_uv)
+            return False
+        if rms_uv >= self.calib.artifact_th:  # アーティファクト時は閉じない（安全側）
+            if self.closed:
+                self._transition(False, rms_uv, "ARTIFACT → OPEN")
+            return False
         if self.closed:
-            if rms_uv <= RELEASE_UV:
-                self.closed = False
-                self._send_all(OPEN)
-                print(f"[mirrorhand] OPEN  (rms={rms_uv:.2f})")
+            if rms_uv <= self.calib.release_th:
+                self._transition(False, rms_uv, "OPEN")
         else:
-            if rms_uv >= GRIP_UV:
-                self.closed = True
-                self._send_all(CLOSE)
-                print(f"[mirrorhand] CLOSE (rms={rms_uv:.2f})")
-
-        # keepalive: 状態が変わっても変わらなくても一定間隔で送る
-        now = time.time()
-        if now - self.last_send >= SEND_INTERVAL:
-            self._send_all(CLOSE if self.closed else OPEN)
-
+            if rms_uv >= self.calib.grip_th:
+                self._transition(True, rms_uv, "CLOSE")
         return self.closed
+
+    def _transition(self, closed, rms_uv, label):
+        self.closed = closed
+        self._send_all(CLOSE if closed else OPEN)
+        print(f"[mirrorhand] {label} (rms={rms_uv:.2f})")
+
+    def _keepalive_loop(self):
+        while not self._stop_keepalive.is_set():
+            self._send_all(CLOSE if self.closed else OPEN)
+            time.sleep(SEND_INTERVAL)
 
     def close(self):
         if self.ser is not None:
+            self._stop_keepalive.set()
+            if self._ka_thread is not None:
+                self._ka_thread.join(timeout=0.5)
             try:
-                self._send_all(OPEN)      # 終了時は開いておく
+                self._send_all(OPEN)          # 終了時は開いておく
             except Exception:
                 pass
             self.ser.close()
