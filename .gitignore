@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+mirrorhand_udp.py
+test_glove_buttons.py

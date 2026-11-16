@@ -4,6 +4,7 @@ import time
 from collections import deque
 import numpy as np
 from filter_module import apply_filter
+from mirrorhand import MirrorHand
 from scipy import signal
 
 settings = {
@@ -31,6 +32,10 @@ def main():
     board.prepare_session()
     fs = BoardShim.get_sampling_rate(board_id)
 
+    # 先にグローブを待つ（本体で MIRROR GUIDE → START を押して接続してからボードを流す）
+    hand = MirrorHand(port="/dev/ttyUSB1")
+    hand.connect()
+
     board.start_stream(45000)
 
     raw_buf:deque[float] = deque(maxlen=int(fs*(settings["RMS_MS"])))
@@ -51,10 +56,12 @@ def main():
                 print(f"RAWDATA:{float(v)}")
                 print(f"FILTER_DATA:{filtered_buf[-len(new)+i]}")
                 print(f"RMS:{rms[-len(new)+i]}")
+            hand.update(float(rms[-1]))
 
     except KeyboardInterrupt:
         print("stop")
     finally:
+        hand.close()
         board.stop_stream()
         board.release_session()
 
