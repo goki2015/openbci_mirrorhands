@@ -1,6 +1,6 @@
 # openbci_mirrorhands
 
-[English](README.md) | 日本語 | [繁體中文（台灣）](README.zh-TW.md)
+[English](README.md) | 日本語
 
 OpenBCI Cyton の EMG 信号でミラーハンド（グローブ）を動かすサンプルです。
 EMG は PC 上でオンライン処理され、起動時にユーザーごとの閾値モデルを校正し、

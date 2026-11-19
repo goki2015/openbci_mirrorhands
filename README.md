@@ -1,6 +1,6 @@
 # openbci_mirrorhands
 
-English | [日本語](README.ja.md) | [繁體中文（台灣）](README.zh-TW.md)
+English | [日本語](README.ja.md)
 
 EMG-controlled mirror hand (glove) driven by an OpenBCI Cyton board.
 Raw EMG is filtered online on a PC, a per-user threshold model is calibrated at
