@@ -24,7 +24,7 @@ RMTC_GLOVE protocol over USB serial (57600 8N1, keepalive every 0.2 s)
 - Linux PC (paths `/dev/ttyUSB*` are assumed)
 - Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/)
 - Hardware: OpenBCI Cyton, and a RMTC_GLOVE-compatible mirror hand glove
-- Dependencies (installed by `uv sync`): brainflow, numpy, pyserial, scipy
+- Dependencies (installed by `uv sync`): brainflow, numpy, pyserial, scipy, matplotlib
 
 ## Setup
 
@@ -37,7 +37,8 @@ uv sync
 ## Usage
 
 ```bash
-uv run main.py
+uv run main.py         # run without the waveform GUI (real-time priority)
+uv run main.py --gui   # live-plot the raw / filtered / RMS waveforms (may cost real-time performance)
 ```
 
 1. Plug the Cyton into `/dev/ttyUSB0` and the glove into `/dev/ttyUSB1`
@@ -53,12 +54,12 @@ uv run main.py
    the hand as a safety measure.
 5. **Ctrl+C** to quit: the glove opens and the board session is released.
 
-## Verification scripts (local development)
+## Operation check
 
-- `test_emg_pipeline.py` — runs the same pipeline against the Cyton **without
-  the glove** and prints thresholds/decisions plus a scipy-vs-Rust filter
-  comparison (uses a stub link). Not tracked in this repository (gitignored).
-- `test_glove_buttons.py` — glove-only smoke test (handshake → CLOSE → OPEN).
+- `uv run test/test_wave_gui.py` — views the raw EMG from the Cyton (no glove
+  required) with the same calibration/decision pipeline as `main.py`. Nothing is
+  sent to the glove: `MirrorHand` is plugged into a stub link, so you can watch
+  the waveform and the decision status without moving the hand.
 
 ## Project structure
 
@@ -71,10 +72,13 @@ uv run main.py
 | `calibrate.py` | `AdaptiveThreshold`: rest→grip calibration, percentile-based thresholds |
 | `filter_module_scipy.py` | Causal real-time EMG filter, scipy-designed coefficients |
 | `filter_module_py.py` | Same filter in pure stdlib Python (drop-in alternative) |
-| `filter_module/`, `filter_module_src/` | Rust extension and its source (local only, not tracked) |
-| `docs/` | Extended documentation (Japanese, HTML) |
-| `test_emg_pipeline.py` | OpenBCI-only verification script (local only) |
-| `test_glove_buttons.py` | Glove-only smoke test |
+| `wave_gui.py` | Live waveform viewer used by `main.py --gui` (matplotlib) |
+| `test/test_wave_gui.py` | OpenBCI operation check: raw data in a GUI, no glove required |
+| `LICENSE` | MIT |
+
+Local-only files and directories (`docs/`, `filter_module/`, `filter_module_src/`,
+`test_emg_pipeline.py`, `test_glove_buttons.py`) are gitignored on purpose and are
+not part of this repository.
 
 ## Implementation notes
 

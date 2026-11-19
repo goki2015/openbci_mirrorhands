@@ -24,7 +24,7 @@ RMTC_GLOVE プロトコル（USB シリアル 57600 8N1、0.2秒周期で keepal
 - Linux PC（`/dev/ttyUSB*` のパスを前提）
 - Python ≥ 3.12 と [uv](https://docs.astral.sh/uv/)
 - ハードウェア: OpenBCI Cyton、RMTC_GLOVE 互換ミラーハンドグローブ
-- 依存ライブラリ（`uv sync` で導入）: brainflow, numpy, pyserial, scipy
+- 依存ライブラリ（`uv sync` で導入）: brainflow, numpy, pyserial, scipy, matplotlib
 
 ## セットアップ
 
@@ -37,7 +37,8 @@ uv sync
 ## 使い方
 
 ```bash
-uv run main.py
+uv run main.py         # GUIなしで実行（実時間性重視）
+uv run main.py --gui   # Raw / Filtered / RMS の波形をライブ表示（実時間性が下がる可能性あり）
 ```
 
 1. Cyton を `/dev/ttyUSB0`、グローブを `/dev/ttyUSB1` に接続します
@@ -51,12 +52,12 @@ uv run main.py
    巨大なアーティファクト（`rms ≥ artifact_th`）では安全側に倒して強制的に開きます。
 5. **Ctrl+C** で終了: グローブは開き、ボードのセッションが解放されます。
 
-## 検証用スクリプト（ローカル開発用）
+## 動作確認
 
-- `test_emg_pipeline.py` — Cyton だけ（グローブ無し）で同じパイプラインを回し、
-  閾値・判定結果と scipy vs Rust フィルタの一致を表示します（送信先は仮の FakeLink）。
-  このリポジトリには追跡されていません（gitignore 済み）。
-- `test_glove_buttons.py` — グローブ単体のスモークテスト（握手 → CLOSE → OPEN）。
+- `uv run test/test_wave_gui.py` — Cyton から生データを取得し、波形を GUI 表示します
+  （グローブ不要）。校正・判定ロジックは `main.py` と同じですが、`MirrorHand` を
+  仮リンクに差し替えるため、手袋には何も送信されません。波形と判定状況を見ながら
+  動作確認できます。
 
 ## ファイル構成
 
@@ -69,10 +70,12 @@ uv run main.py
 | `calibrate.py` | `AdaptiveThreshold`: 安静→活動の校正、パーセンタイルベースの閾値計算 |
 | `filter_module_scipy.py` | scipy で係数設計した因果リアルタイム EMG フィルタ |
 | `filter_module_py.py` | 標準ライブラリのみの同等実装（差し替え可能） |
-| `filter_module/`, `filter_module_src/` | Rust 拡張とそのソース（ローカル専用、リポジトリ非追跡） |
-| `docs/` | 詳細ドキュメント（日本語、HTML） |
-| `test_emg_pipeline.py` | OpenBCI のみの検証スクリプト（ローカル専用） |
-| `test_glove_buttons.py` | グローブ単体テスト |
+| `wave_gui.py` | `main.py --gui` によるライブ波形ビューア（matplotlib） |
+| `test/test_wave_gui.py` | OpenBCI 動作確認: 生データを GUI 表示（グローブ不要） |
+| `LICENSE` | MIT |
+
+ローカル専用のファイル・ディレクトリ（`docs/`、`filter_module/`、`filter_module_src/`、
+`test_emg_pipeline.py`、`test_glove_buttons.py`）は意図的に gitignore でリポジトリに含めていません。
 
 ## 実装メモ
 
