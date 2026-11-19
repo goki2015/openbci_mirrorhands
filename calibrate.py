@@ -82,7 +82,7 @@ class AdaptiveThreshold:
             self._compute()
 
     def _compute(self):
-        rest_med = max(percentile(self.rest, 50.0), 1e-6)
+        rest_med = max(percentile(self.rest, 50.0), 1e-6)   #restの50％付近の値を取るなければ線形補間で作り1e-6より下回ればこっち。
         grip_med = max(percentile(self.grip, 50.0), rest_med * 2.0)
         anchor = math.sqrt(rest_med * grip_med)
         rest_ub = max(percentile(self.rest, 90.0), 1e-6)

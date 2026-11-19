@@ -1,6 +1,6 @@
 from brainflow.board_shim import BoardIds,BoardShim,BrainFlowInputParams
 import time
-from filter_module import StreamingFilter
+from filter_module_scipy import StreamingFilter
 from mirrorhand import MirrorHand
 
 settings = {"port":"/dev/ttyUSB0", "verbose":False}
