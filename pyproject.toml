@@ -1,7 +1,7 @@
 [project]
 name = "openbci-mirrorhands"
 version = "0.1.0"
-description = "Add your description here"
+description = "EMG-controlled mirror hand (glove) driven by an OpenBCI Cyton board"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

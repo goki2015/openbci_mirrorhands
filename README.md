@@ -103,6 +103,12 @@ not part of this repository.
   (verified to ≤5e-13 absolute difference). The Rust build tree remains usable
   locally but is intentionally not tracked.
 
+## Disclaimer
+
+- This project is **not affiliated with or endorsed by** OpenBCI or the manufacturer of the glove.
+- This is an unofficial, educational/research implementation; use it at your own risk.
+- This is a hobby/research project and is **not a medical device**.
+
 ## License
 
 MIT (see `LICENSE`).
