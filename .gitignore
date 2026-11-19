@@ -219,6 +219,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-mirrorhand_udp.py
+test_emg_pipeline.py
 test_glove_buttons.py
 docs/
+
+# Rust製フィルタモジュール（ローカル専用・main.py は filter_module_scipy を使用）
+filter_module/
+filter_module_src/
