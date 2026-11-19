@@ -1,20 +1,20 @@
-"""RMTC_GLOVE との通信層: 接続 → 'device' ビーコン待ち → 握手 → keepalive 再送。
+"""Communication layer for RMTC_GLOVE: connect -> wait for the 'device' beacon -> handshake -> keepalive re-send.
 
-MirrorHand から通信手順だけを切り出したもの。開閉の判定は MirrorHand 側が持つ。
+Extracted from MirrorHand - only protocol I/O lives here. The open/close decision stays in MirrorHand.
 """
 import threading
 import time
 
 import serial
 
-OPEN = 10          # 開いた状態の値 (0-100)
-CLOSE = 100        # 閉じた状態の値 (0-100)
-SEND_INTERVAL = 0.2    # keepalive 再送間隔 [s]
-BEACON_TIMEOUT = 180   # 'device' 待ちの上限 [s]
+OPEN = 10          # value for the open state (0-100)
+CLOSE = 100        # value for the closed state (0-100)
+SEND_INTERVAL = 0.2    # keepalive re-send interval [s]
+BEACON_TIMEOUT = 180   # limit for waiting for 'device' [s]
 
 
 class GloveLink:
-    """'device' ビーコン待ち→RMTC_GLOVE 握手→DATA keepalive 再送を担当する。"""
+    """Wait for the 'device' beacon, perform the RMTC_GLOVE handshake, and re-send DATA keepalives."""
 
     def __init__(self, port, baudrate=57600):
         self.ser = serial.Serial(port=port, baudrate=baudrate,
@@ -27,7 +27,7 @@ class GloveLink:
         self._ka_thread = None
 
     def wait_for_beacon(self):
-        """'device' を待つ。届いたら True、タイムアウトなら False。"""
+        """Wait for 'device'. Returns True when received, False on timeout."""
         t0 = time.time()
         buf = b""
         while time.time() - t0 < BEACON_TIMEOUT:
@@ -44,7 +44,7 @@ class GloveLink:
         self.ser.write(text.encode("ascii"))
 
     def send_all(self, value):
-        # 'DATA' + ':0:v'×5 の1パケットを送る（v=100 で閉、10 で開）
+        # send one 'DATA' + ':0:v'x5 packet (v=100 to close, 10 to open)
         packet = "DATA"
         for _ in range(5):
             packet += ":0:%d" % int(round(value))
@@ -53,7 +53,7 @@ class GloveLink:
         self.last_send = time.time()
 
     def start_keepalive(self, value_fn):
-        """value_fn() が返す値を SEND_INTERVAL 秒ごとに再送し続けるスレッドを起動する。"""
+        """Start a thread that re-sends the value returned by value_fn() every SEND_INTERVAL seconds."""
         self._stop.clear()
 
         def loop():
@@ -65,7 +65,7 @@ class GloveLink:
         self._ka_thread.start()
 
     def stop_keepalive(self):
-        """keepalive スレッドを止める（終了前に呼ぶ）。"""
+        """Stop the keepalive thread (call before exit)."""
         self._stop.set()
         if self._ka_thread is not None:
             self._ka_thread.join(timeout=0.5)

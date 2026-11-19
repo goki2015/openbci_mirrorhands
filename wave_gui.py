@@ -1,12 +1,12 @@
-"""matplotlib による OpenBCI 波形の簡易ライブ表示（`main.py --gui` 起動時のみ）。
+"""Simple live display of OpenBCI waveforms with matplotlib (only with `main.py --gui`).
 
-生波形（EXG Ch0）・フィルタ済み波形・RMS 包絡をスクロール表示する。
+Scrolls the raw waveform (EXG Ch0), the filtered waveform and the RMS envelope.
 
-注意:
-  - 描画のたびにイベントループへ処理を渡すだけなので、glove への更新は
-    基本的にブロックされない。ただし GUI 描画の分だけループが遅くなる可能性はある
-    （リアルタイム性を重視するなら --gui を付けずに起動すること）。
-  - 表示は refresh_s 間隔で、最大 seconds 秒分を表示する。
+Notes:
+  - Each redraw just hands control back to the event loop, so updates to the
+    glove are not blocked in general. The loop may get slower though, because
+    of the GUI drawing (omit --gui if real-time performance matters).
+  - Redraws at refresh_s intervals, showing up to seconds of history.
 """
 import time
 from collections import deque
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 
 class LiveWave:
-    """スクロール式のライブ波形プロッタ（3段: Raw / Filtered / RMS）。"""
+    """Scrolling live plotter (3 rows: Raw / Filtered / RMS)."""
 
     def __init__(self, fs=250.0, seconds=10.0, refresh_s=0.05):
         self.fs = fs
@@ -46,15 +46,15 @@ class LiveWave:
         plt.show()
 
     def set_status(self, text):
-        """ウィンドウ右上のステータス行を更新する。"""
+        """Update the status line at the top-right of the window."""
         self.status.set_text(text)
 
     def is_open(self):
-        """ウィンドウが閉じられていれば False。"""
+        """Returns False if the window has been closed."""
         return plt.fignum_exists(self.fig.number)
 
     def push(self, raw, filtered, rms):
-        """1サンプル分をバッファに追加する（描画は行わない）。"""
+        """Append one sample to the buffer (no redraw)."""
         self.sample_count += 1
         self.t.append(self.sample_count / self.fs)
         self.raw.append(raw)
@@ -62,7 +62,7 @@ class LiveWave:
         self.rms.append(rms)
 
     def maybe_redraw(self):
-        """refresh_s 経過していれば再描画する。"""
+        """Redraw if refresh_s has elapsed."""
         now = time.time()
         if now - self.last_draw < self.refresh_s:
             return
@@ -80,6 +80,6 @@ class LiveWave:
         plt.pause(0.001)
 
     def close(self):
-        """ウィンドウを閉じる。"""
+        """Close the window."""
         plt.ioff()
         plt.close(self.fig)

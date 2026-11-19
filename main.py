@@ -7,9 +7,9 @@ from mirrorhand import MirrorHand
 settings = {"port":"/dev/ttyUSB0", "verbose":False}
 
 def main():
-    parser = argparse.ArgumentParser(description="EMG でミラーハンドを開閉する")
+    parser = argparse.ArgumentParser(description="Drive the mirror hand with EMG")
     parser.add_argument("--gui", action="store_true",
-                        help="OpenBCI の生波形・フィルタ後・RMS をライブ表示する（実時間性が下がる可能性あり）")
+                        help="Show the live raw / filtered / RMS waveforms (may reduce real-time performance)")
     args = parser.parse_args()
 
     board_id = BoardIds.CYTON_BOARD.value
@@ -23,16 +23,16 @@ def main():
     board.prepare_session()
     fs = BoardShim.get_sampling_rate(board_id)
 
-    filt = StreamingFilter(fs=float(fs))   # 50/100 Hz ノッチ → 5–110 Hz BP(4次) → RMS(200 ms)
+    filt = StreamingFilter(fs=float(fs))   # 50/100 Hz notch -> 5-110 Hz BP (4th order) -> RMS (200 ms)
 
     wave = None
     if args.gui:
-        from wave_gui import LiveWave     # --gui のときだけ matplotlib を読み込む
+        from wave_gui import LiveWave     # import matplotlib only when --gui is used
         wave = LiveWave(fs=float(fs))
-        print("[gui] 波形ウィンドウを表示します（実時間性が下がる可能性があります）")
+        print("[gui] showing the waveform window (may reduce real-time performance)")
 
-    hand = MirrorHand(port="/dev/ttyUSB1") # グローブは ttyUSB1 と推定して選択
-    hand.connect()                         # ビーコン待ちでブロック（本体で MIRROR GUIDE → START）
+    hand = MirrorHand(port="/dev/ttyUSB1") # the glove is assumed to be on ttyUSB1
+    hand.connect()                         # blocks until the beacon arrives (press MIRROR GUIDE -> START on the glove)
 
     board.start_stream(45000)
     ch = BoardShim.get_exg_channels(board_id)[0]

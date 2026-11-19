@@ -1,42 +1,43 @@
-"""release 側のデバウンス（時間方向の安定化）。
+"""Debounce for the release side (temporal stabilisation).
 
-EMG の RMS は 1 サンプルだけ release_th を下回ることがある（安静のように見える
-一瞬）。その瞬間に OPEN を送ると手袋がパタパタ開閉してしまうため、
-「release_th を frames 回 連続で下回ったときだけ OPEN を許可する」。
+The EMG RMS may drop below release_th for just a single sample (a moment that
+looks like rest). Sending OPEN at that exact moment would make the glove chatter,
+so "OPEN is allowed only after release_th has been stayed below for frames
+consecutive samples".
 
-使い方（MirrorHand.update 内）:
+Usage (inside MirrorHand.update):
 
     if self.release_debounce.push(rms_uv <= release_th):
-        ...  # OPEN してよい
+        ...  # opening the hand is allowed
 
-- 下回っている（True）を渡せばカウンタが 1 増える
-- 上回っている（False）を渡せばカウンタは 0 に戻る
-- frames 連続で True が続いたときだけ True を返す
+- Passing True (below release_th) increments the counter by 1
+- Passing False (above release_th) resets the counter to 0
+- True is returned only after frames consecutive True samples
 """
 
-DEFAULT_RELEASE_FRAMES = 30  # 250 Hz サンプリングなら 0.12 秒相当
+DEFAULT_RELEASE_FRAMES = 30  # 0.12 s at 250 Hz sampling
 
 
 class ReleaseDebounce:
-    """release_th を連続で下回ったサンプル数を数えるクラス。"""
+    """Counts consecutive samples below release_th."""
 
     def __init__(self, frames=DEFAULT_RELEASE_FRAMES):
-        # 1 未満は意味がないので 1 に丸める
+        # 1 is the minimum meaningful value - clamp to it
         self.frames = max(1, int(frames))
         self.count = 0
 
     def reset(self):
-        """カウントを最初から数え直す（CLOSE した直後などに呼ぶ）。"""
+        """Reset the count to re-count from scratch (call right after CLOSE)."""
         self.count = 0
 
     def push(self, is_below_release):
-        """1 サンプル分を投入し、OPEN してよければ True を返す。
+        """Push one sample and return True if opening the hand is allowed.
 
         Args:
-            is_below_release: 今回の RMS が release_th 以下なら True。
+            is_below_release: True if this RMS is at/below release_th.
 
         Returns:
-            frames 連続で is_below_release が True のときだけ True。
+            True only if is_below_release has been True for frames consecutive samples.
         """
         if is_below_release:
             self.count += 1

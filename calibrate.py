@@ -1,16 +1,16 @@
-"""read_from_cython の emg-calibration に倣った適用型しきい値。
+"""Adaptive threshold modelled after the emg-calibration in read_from_cython.
 
-安静フェーズ→活動フェーズの順で RMS を収集する:
-  1. マイグレーション: 起動過渡を捨てる (flush_samples サンプル破棄後から計測)
-  2. 安静フェーズ: rest_s 秒収集
-  3. Enter 待ち → 捨てタイマ開始 (flush_samples サンプル破棄後から握り計測)
-  4. 活動フェーズ: grip_s 秒収集
-  5. クランプつき幾何平均でしきい値を決定し ready=True にする
+Collects RMS envelope samples in the order: rest phase -> activity phase:
+  1. Migration: discard the start-up transient (measurements begin after flush_samples samples are discarded)
+  2. Rest phase: collect for rest_s seconds
+  3. Wait for Enter -> start discard timer (grip measurement begins after flush_samples samples are discarded)
+  4. Activity phase: collect for grip_s seconds
+  5. Fix the thresholds with a clamped geometric mean and set ready=True
 
-クランプ: しきい値は他のパラメータにかかわらず rest_p90 × 1.5 以下にはしない
-(無効な校正で走り出さないようにするため)
+Clamp: the threshold is never placed below rest_p90 x 1.5 regardless of other parameters
+(so the device cannot run with an invalid calibration).
 
-使い方:
+Usage:
     from calibrate import AdaptiveThreshold
     cal = AdaptiveThreshold()
     cal.push(env)
@@ -22,7 +22,7 @@ import math
 
 
 def percentile(values, p):
-    """線形補間のパーセンタイル。空なら 0.0。"""
+    """Percentile with linear interpolation. Returns 0.0 if empty."""
     if not values:
         return 0.0
     v = sorted(values)
@@ -35,10 +35,10 @@ def percentile(values, p):
 
 
 class AdaptiveThreshold:
-    """安静→活動の順で collectする方式のしきい値算出器。"""
+    """Adaptive threshold calculator; collect in the order: rest -> activity."""
 
     def __init__(self, fs=250.0, rest_s=6.0, grip_s=6.0,
-                 release_ratio=0.4, artifact_ratio=4.0, threshold_bias=0.5,
+                 release_ratio=0.4, artifact_ratio=4.0, threshold_bias=0.0,
                  interactive=True, flush_samples=250):
         self.rest_n = max(1, int(fs * rest_s))
         self.grip_n = max(1, int(fs * grip_s))
@@ -46,7 +46,7 @@ class AdaptiveThreshold:
         self.artifact_ratio = artifact_ratio
         self.threshold_bias = threshold_bias
         self.interactive = interactive
-        self.flush_left = flush_samples     # 起動過渡を破棄
+        self.flush_left = flush_samples     # discard the start-up transient
         self.flush_samples = flush_samples
         self.rest = []
         self.grip = []
@@ -57,10 +57,10 @@ class AdaptiveThreshold:
         self.artifact_th = 200.0
 
     def push(self, env):
-        """RMS 包絡 [uVrms] を 1 つ投入する。完了後は何もしない。"""
+        """Push one RMS envelope sample [uVrms]. Does nothing after completion."""
         if self.ready:
             return
-        if self.flush_left > 0:              # 過渡区間を捨てる
+        if self.flush_left > 0:              # discard the transient interval
             self.flush_left -= 1
             return
         if len(self.rest) < self.rest_n:
@@ -69,35 +69,35 @@ class AdaptiveThreshold:
                 rest_med = max(percentile(self.rest, 50.0), 1e-6)
                 print(f"[calib] rest_med = {rest_med:.2f} µV", flush=True)
                 if self.interactive:
-                    print("[calib] 強く握り続けて Enter を押してください → ", flush=True, end="")
+                    print("[calib] Keep gripping hard and press Enter -> ", flush=True, end="")
                     try:
                         input()
                     except EOFError:
                         pass
-                    print("[calib] 1秒間のバッファを捨ててから測定を再開します", flush=True)
-                self.flush_left = self.flush_samples    # Enter待ちのバックログを捨てる
+                    print("[calib] Discarding the 1 s backlog buffer, then resuming measurement", flush=True)
+                self.flush_left = self.flush_samples    # discard the backlog while waiting for Enter
             return
         self.grip.append(env)
         if len(self.grip) == self.grip_n:
             self._compute()
 
     def _compute(self):
-        rest_med = max(percentile(self.rest, 50.0), 1e-6)   #restの50％付近の値を取るなければ線形補間で作り1e-6より下回ればこっち。
+        rest_med = max(percentile(self.rest, 50.0), 1e-6)   # take the value around the 50th percentile of rest; clamped to >= 1e-6
         grip_med = max(percentile(self.grip, 50.0), rest_med * 2.0)
         anchor = math.sqrt(rest_med * grip_med)
-        rest_ub = max(percentile(self.rest, 90.0), 1e-6)
-        grip_lb = max(percentile(self.grip, 10.0), 1e-6)
-        gap_db = 20.0 * math.log10(grip_lb / rest_ub)
+        rest_ub = max(percentile(self.rest, 90.0), 1e-6) # take the value around the 90th percentile of sorted self.rest; prefer 1e-6 (1 µV) if it is larger
+        grip_lb = max(percentile(self.grip, 10.0), 1e-6)  # likewise, take the value around the 10th percentile of self.grip. No strong basis - 95-5 would be stricter and less stable, 85-15 looser
+        gap_db = 20.0 * math.log10(grip_lb / rest_ub) # above 20 dB: good, above 10 dB: marginal, <= 0: suspicious
 
-        # gap > 0 のときだけ bias シフトを適用（負ならゼロシフト=anchor据え置き）
+        # apply the bias shift only when gap > 0 (if negative, zero shift = keep anchor); shift by self.threshold_bias [dB]
         grip = anchor if gap_db <= 0.0 else anchor * 10.0 ** (self.threshold_bias * gap_db / 20.0)
-        grip = max(grip, rest_ub * 1.5)            # 安静の上裾 ×1.5 より下には置かない
+        grip = max(grip, rest_ub * 1.5)            # never place it below the rest upper tail x 1.5
 
         self.grip_th = grip
         self.release_th = grip * self.release_ratio
         self.artifact_th = grip_med * self.artifact_ratio
         self.ready = True
         self.valid = (gap_db > 0.0)
-        note = "" if self.valid else "  [WARN: gap<=0 — 分離不足のため anchor + クランプで動作]"
-        print(f"[calib] 完了: grip={grip:.4f} µV release={self.release_th:.4f} µV "
+        note = "" if self.valid else "  [WARN: gap<=0 - insufficient separation; running on anchor + clamp]"
+        print(f"[calib] done: grip={grip:.4f} µV release={self.release_th:.4f} µV "
               f"artifact={self.artifact_th:.4f} µV gap={gap_db:+.2f} dB{note}", flush=True)
